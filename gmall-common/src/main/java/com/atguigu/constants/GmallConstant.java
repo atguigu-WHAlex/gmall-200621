@@ -8,4 +8,7 @@ public class GmallConstant {
     //事件日志主题
     public static final String GMALL_EVENT = "TOPIC_EVENT";
 
+    //订单表日志主题
+    public static final String GMALL_ORDER_INFO = "TOPIC_ORDER_INFO";
+
 }
