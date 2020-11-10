@@ -12,6 +12,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 
 import java.net.InetSocketAddress;
 import java.util.List;
+import java.util.Random;
 
 public class CanalClient {
 
@@ -87,20 +88,31 @@ public class CanalClient {
 
         //对于订单表而言,只需要新增数据
         if ("order_info".equals(tableName) && CanalEntry.EventType.INSERT.equals(eventType)) {
+            sendToKafka(rowDatasList, GmallConstant.GMALL_ORDER_INFO);
 
-            for (CanalEntry.RowData rowData : rowDatasList) {
+        } else if ("order_detail".equals(tableName) && CanalEntry.EventType.INSERT.equals(eventType)) {
+            sendToKafka(rowDatasList, GmallConstant.GMALL_ORDER_DETAIL);
 
-                //创建JSON对象,用于存放多个列的数据
-                JSONObject jsonObject = new JSONObject();
+        } else if ("user_info".equals(tableName) && (CanalEntry.EventType.INSERT.equals(eventType) || CanalEntry.EventType.UPDATE.equals(eventType))) {
+            sendToKafka(rowDatasList, GmallConstant.GMALL_USER_INFO);
+        }
+    }
 
-                for (CanalEntry.Column column : rowData.getAfterColumnsList()) {
-                    jsonObject.put(column.getName(), column.getValue());
-                }
-
-                System.out.println(jsonObject.toString());
-                //发送数据至Kafka
-                MyKafkaSender.send(GmallConstant.GMALL_ORDER_INFO, jsonObject.toString());
+    private static void sendToKafka(List<CanalEntry.RowData> rowDatasList, String topic) {
+        for (CanalEntry.RowData rowData : rowDatasList) {
+            //创建JSON对象,用于存放多个列的数据
+            JSONObject jsonObject = new JSONObject();
+            for (CanalEntry.Column column : rowData.getAfterColumnsList()) {
+                jsonObject.put(column.getName(), column.getValue());
             }
+            System.out.println(jsonObject.toString());
+            //发送数据至Kafka
+            try {
+                Thread.sleep(new Random().nextInt(5) * 1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            MyKafkaSender.send(topic, jsonObject.toString());
         }
     }
 }
