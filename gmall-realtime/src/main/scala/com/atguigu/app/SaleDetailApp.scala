@@ -1,11 +1,14 @@
 package com.atguigu.app
 
+import java.sql.Connection
+import java.text.SimpleDateFormat
 import java.util
+import java.util.Date
 
 import com.alibaba.fastjson.JSON
-import com.atguigu.bean.{OrderDetail, OrderInfo, SaleDetail}
+import com.atguigu.bean.{OrderDetail, OrderInfo, SaleDetail, UserInfo}
 import com.atguigu.constants.GmallConstant
-import com.atguigu.utils.{MyKafkaUtil, RedisUtil}
+import com.atguigu.utils.{JdbcUtil, MyEsUtil, MyKafkaUtil, RedisUtil}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
@@ -143,10 +146,71 @@ object SaleDetailApp {
 
     })
 
+    //7.根据UserID查询Redis中的数据,补全用户信息
+    val saleDetailDStream: DStream[SaleDetail] = noUserSaleDetailDStream.mapPartitions(iter => {
+
+      //获取Redis连接
+      val jedisClient: Jedis = RedisUtil.getJedisClient
+
+      //查询Redis补充信息
+      val details: Iterator[SaleDetail] = iter.map(saleDetail => {
+        val userRedisKey = s"UserInfo:${saleDetail.user_id}"
+
+        if (jedisClient.exists(userRedisKey)) {
+          //查询数据
+          val userJson: String = jedisClient.get(userRedisKey)
+          //将用户数据转换为样例类对象
+          val userInfo: UserInfo = JSON.parseObject(userJson, classOf[UserInfo])
+          //补全信息
+          saleDetail.mergeUserInfo(userInfo)
+        } else {
+          //Redis中没有查询到数据,访问MySQL
+          val connection: Connection = JdbcUtil.getConnection
+          //根据UserID查询MySQL用户信息
+          val userStr: String = JdbcUtil.getUserInfoFromMysql(
+            connection,
+            "select * from user_info where id=?",
+            Array(saleDetail.user_id))
+          //将用户数据转换为样例类对象
+          val userInfo: UserInfo = JSON.parseObject(userStr, classOf[UserInfo])
+          //补全信息
+          saleDetail.mergeUserInfo(userInfo)
+          //关闭连接
+          connection.close()
+        }
+
+        //返回数据
+        saleDetail
+      })
+
+      //归还连接
+      jedisClient.close()
+
+      //返回数据
+      details
+    })
+
+    //8.将三张表JOIN的结果写入ES
+    val sdf = new SimpleDateFormat("yyyy-MM-dd")
+    saleDetailDStream.foreachRDD(rdd => {
+
+      rdd.foreachPartition(iter => {
+        //IndexName
+        val indexName = s"${GmallConstant.ES_SALE_DETAIL_INDEX_PRE}-${sdf.format(new Date(System.currentTimeMillis()))}"
+        //准备数据集
+        val detailIdToSaleDetail: List[(String, SaleDetail)] = iter.toList.map(saleDetail => (saleDetail.order_detail_id, saleDetail))
+        //执行批量数据写入
+        MyEsUtil.insertBulk(indexName, detailIdToSaleDetail)
+
+      })
+
+    })
+
+
     //测试
-    noUserSaleDetailDStream.print(100)
-
-
+    //    saleDetailDStream.print(100)
+    //测试
+    //    noUserSaleDetailDStream.print(100)
     //测试
     //    orderInfoKafkaDStream.foreachRDD(rdd=>{
     //      rdd.foreach(record=>println(record.value()))
