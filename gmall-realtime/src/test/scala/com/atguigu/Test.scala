@@ -8,9 +8,9 @@ object Test {
 
     val wangyi = Stu("1001", "wangyi")
 
-    val str: String = JSON.toJSONString(wangyi)
-
-    println(str)
+    //    val str: String = JSON.toJSONString(wangyi)
+    //
+    //    println(str)
 
   }
 
